@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Diagnostic Supabase - Palette Europe</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .test { margin: 10px 0; padding: 10px; border: 1px solid #ccc; }
+        .success { background-color: #d4edda; border-color: #c3e6cb; }
+        .error { background-color: #f8d7da; border-color: #f5c6cb; }
+        .warning { background-color: #fff3cd; border-color: #ffeaa7; }
+        button { padding: 10px 20px; margin: 5px; }
+    </style>
+</head>
+<body>
+    <h1>🔍 Diagnostic de synchronisation Supabase</h1>
+    <p>Cet outil teste la connexion à votre base Supabase.</p>
+
+    <button onclick="testConnection()">Tester la connexion</button>
+    <button onclick="testTable()">Tester la table europe</button>
+    <button onclick="createTable()">Créer la table europe</button>
+    <button onclick="testData()">Tester les données</button>
+
+    <div id="results"></div>
+
+    <script>
+        const SUPABASE_URL = "https://modyroctyihwqgpmgjnk.supabase.co";
+        const SUPABASE_KEY = "sb_publishable_g5eXMoBKOZmjO1gE_V3bfA_tPyN98Ou";
+
+        function addResult(message, type = 'info') {
+            const results = document.getElementById('results');
+            const div = document.createElement('div');
+            div.className = `test ${type}`;
+            div.innerHTML = `<strong>${new Date().toLocaleTimeString()}:</strong> ${message}`;
+            results.appendChild(div);
+        }
+
+        async function testConnection() {
+            try {
+                addResult('Test de connexion en cours...', 'warning');
+                const response = await fetch(`${SUPABASE_URL}/rest/v1/`, {
+                    headers: {
+                        'apikey': SUPABASE_KEY,
+                        'Authorization': `Bearer ${SUPABASE_KEY}`
+                    }
+                });
+                if (response.ok) {
+                    addResult('✅ Connexion Supabase réussie', 'success');
+                } else {
+                    addResult(`❌ Erreur de connexion: ${response.status}`, 'error');
+                }
+            } catch (e) {
+                addResult(`❌ Erreur réseau: ${e.message}`, 'error');
+            }
+        }
+
+        async function testTable() {
+            try {
+                addResult('Test de la table europe...', 'warning');
+                const response = await fetch(`${SUPABASE_URL}/rest/v1/europe?id=eq.1`, {
+                    headers: {
+                        'apikey': SUPABASE_KEY,
+                        'Authorization': `Bearer ${SUPABASE_KEY}`,
+                        'Content-Type': 'application/json'
+                    }
+                });
+
+                if (response.status === 404) {
+                    addResult('❌ Table europe introuvable (404)', 'error');
+                    addResult('💡 Solution: Créez la table dans Supabase > SQL Editor', 'warning');
+                } else if (response.ok) {
+                    const data = await response.json();
+                    addResult(`✅ Table europe accessible. Données: ${JSON.stringify(data)}`, 'success');
+                } else {
+                    addResult(`❌ Erreur table: ${response.status}`, 'error');
+                }
+            } catch (e) {
+                addResult(`❌ Erreur réseau: ${e.message}`, 'error');
+            }
+        }
+
+        async function createTable() {
+            addResult('⚠️ Création impossible avec clé publique', 'warning');
+            addResult('💡 Utilisez Supabase Dashboard > SQL Editor:', 'info');
+            addResult(`<pre>CREATE TABLE europe (
+    id INT PRIMARY KEY,
+    data JSONB,
+    updated_at TIMESTAMP DEFAULT NOW()
+);
+
+INSERT INTO europe (id, data) VALUES (1, '{}'::jsonb);</pre>`, 'info');
+        }
+
+        async function testData() {
+            try {
+                addResult('Test de sauvegarde de données...', 'warning');
+
+                const testData = {
+                    data: {
+                        transactions: [
+                            {
+                                id: Date.now(),
+                                type: 'entree',
+                                nombre: 100,
+                                transporteur: 'TEST',
+                                chauffeur: 'Test Driver',
+                                date: new Date().toISOString().split('T')[0],
+                                details: 'Test transaction'
+                            }
+                        ]
+                    },
+                    updated_at: new Date().toISOString()
+                };
+
+                const response = await fetch(`${SUPABASE_URL}/rest/v1/europe?id=eq.1`, {
+                    method: 'PATCH',
+                    headers: {
+                        'apikey': SUPABASE_KEY,
+                        'Authorization': `Bearer ${SUPABASE_KEY}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(testData)
+                });
+
+                if (response.ok) {
+                    addResult('✅ Sauvegarde de test réussie', 'success');
+                } else {
+                    addResult(`❌ Échec sauvegarde: ${response.status}`, 'error');
+                    const errorText = await response.text();
+                    addResult(`Détails: ${errorText}`, 'error');
+                }
+            } catch (e) {
+                addResult(`❌ Erreur réseau: ${e.message}`, 'error');
+            }
+        }
+    </script>
+</body>
+</html>

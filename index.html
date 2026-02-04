@@ -4,6 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Gestion des palettes Europe</title>
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
     <style>
         * {
             box-sizing: border-box;
@@ -304,11 +307,26 @@
         }
     </style>
 </head>
-<body>
+    <script>
+        (function(){
+            if(window.location.search.indexOf('v=') === -1){
+                var ts = Date.now();
+                var base = window.location.origin + window.location.pathname;
+                var search = window.location.search ? window.location.search + '&v=' + ts : '?v=' + ts;
+                var hash = window.location.hash || '';
+                window.location.replace(base + search + hash);
+            }
+        })();
+    </script>
     <div class="container">
         <header>
             <h1>Gestion des palettes Europe</h1>
             <p class="subtitle">DUC Logistique</p>
+            <div style="margin-top: 15px; font-size: 0.9rem; opacity: 0.9;">
+                <span id="supabase-status" style="display: inline-flex; align-items: center; gap: 6px;">
+                    <i class="fas fa-circle" style="font-size: 0.6rem; color: #ef4444;"></i> Chargement...
+                </span>
+            </div>
         </header>
         
         <div class="dashboard">
@@ -447,23 +465,190 @@
     </div>
 
     <script>
-        // Données initiales (simulées)
-        let transactions = [
-            {id: 1, type: "entree", nombre: 150, transporteur: "TRADA", chauffeur: "Martin Dupont", date: "2023-10-15", details: "Livraison client A"},
-            {id: 2, type: "sortie", nombre: 75, transporteur: "C&DI", chauffeur: "Jean Bernard", date: "2023-10-16", details: "Expédition vers dépôt B"},
-            {id: 3, type: "entree", nombre: 200, transporteur: "FERLAY", chauffeur: "Pierre Leroy", date: "2023-10-17", details: "Retour client C"},
-            {id: 4, type: "sortie", nombre: 120, transporteur: "DL", chauffeur: "Michel Durand", date: "2023-10-18", details: "Export Allemagne"},
-            {id: 5, type: "entree", nombre: 90, transporteur: "PFM", chauffeur: "Thomas Moreau", date: "2023-10-19", details: "Livraison usine D"}
-        ];
+        const SUPABASE_URL = "https://modyroctyihwqgpmgjnk.supabase.co";
+        const SUPABASE_KEY = "sb_publishable_g5eXMoBKOZmjO1gE_V3bfA_tPyN98Ou";
+
+        let supabaseReady = false;
+        let lastSyncTime = 0;
+        let supabaseConnected = false;
+        const SYNC_INTERVAL = 3000;
+
+        function checkSupabaseConfig() {
+            return SUPABASE_URL !== "YOUR_SUPABASE_URL" && SUPABASE_KEY !== "YOUR_SUPABASE_KEY";
+        }
+        supabaseReady = checkSupabaseConfig();
+
+        function updateSupabaseStatus() {
+            const statusEl = document.getElementById('supabase-status');
+            if (!statusEl) return;
+            if (!supabaseReady) {
+                statusEl.innerHTML = '<i class="fas fa-circle" style="font-size: 0.6rem; color: #f59e0b;"></i> Mode local (Supabase non configuré)';
+            } else if (supabaseConnected) {
+                statusEl.innerHTML = '<i class="fas fa-circle" style="font-size: 0.6rem; color: #10b981;"></i> Synchronisé avec Supabase ✓';
+            } else {
+                statusEl.innerHTML = '<i class="fas fa-circle" style="font-size: 0.6rem; color: #ef4444;"></i> Vérification Supabase...';
+            }
+        }
+
+        if (supabaseReady) {
+            fetch(`${SUPABASE_URL}/rest/v1/europe?id=eq.1`, {
+                method: 'GET',
+                headers: {
+                    'apikey': SUPABASE_KEY,
+                    'Authorization': `Bearer ${SUPABASE_KEY}`,
+                    'Content-Type': 'application/json'
+                }
+            }).then(() => {
+                supabaseConnected = true;
+                updateSupabaseStatus();
+            }).catch(() => {
+                supabaseConnected = false;
+                updateSupabaseStatus();
+            });
+        } else {
+            updateSupabaseStatus();
+        }
+
+        const STORAGE_KEY = 'app-data-storage';
+        let isSyncing = false;
+        let lastSaveAttempt = 0;
+
+        async function saveData(dataObject) {
+            // dataObject doit contenir : { data: { ...vos données... }, updated_at: timestamp }
+            if (!supabaseReady) {
+                try {
+                    localStorage.setItem(STORAGE_KEY, JSON.stringify(dataObject.data));
+                } catch (e) {}
+                return;
+            }
+            
+            const now = Date.now();
+            if (now - lastSaveAttempt < 500) return;
+            lastSaveAttempt = now;
+            
+            if (isSyncing) return;
+            
+            try {
+                let payloadStr = JSON.stringify({
+                    data: dataObject.data,
+                    updated_at: new Date().toISOString()
+                });
+                
+                console.log('📤 Envoi de la sauvegarde (taille: ' + payloadStr.length + ' bytes)...');
+                
+                const response = await fetch(`${SUPABASE_URL}/rest/v1/europe?id=eq.1`, {
+                    method: 'PATCH',
+                    headers: {
+                        'apikey': SUPABASE_KEY,
+                        'Authorization': `Bearer ${SUPABASE_KEY}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: payloadStr
+                });
+                
+                console.log('📥 Réponse Supabase:', response.status);
+                
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    console.error('❌ Erreur Supabase:', response.status, errorText);
+                    if (response.status === 404) {
+                        console.warn('⚠️ Table europe non trouvée');
+                        supabaseConnected = false;
+                        updateSupabaseStatus();
+                    }
+                    console.log('💾 Fallback localStorage');
+                    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(dataObject.data)); } catch (e) {}
+                } else {
+                    console.log('✅ Sauvegarde réussie !');
+                    supabaseConnected = true;
+                    updateSupabaseStatus();
+                }
+            } catch (e) {
+                console.error('❌ Erreur réseau:', e);
+                try {
+                    localStorage.setItem(STORAGE_KEY, JSON.stringify(dataObject.data));
+                } catch (e2) {}
+            }
+        }
+
+        async function loadData() {
+            if (!supabaseReady) {
+                console.log('📖 Mode local: chargement depuis localStorage');
+                try {
+                    const raw = localStorage.getItem(STORAGE_KEY);
+                    if (!raw) {
+                        console.log('📖 Aucune donnée locale');
+                        return null;
+                    }
+                    const data = JSON.parse(raw);
+                    console.log('📖 Données locales chargées');
+                    return data;
+                } catch (e) {
+                    console.error('❌ Erreur chargement local:', e);
+                }
+                return null;
+            }
+            
+            console.log('📖 Chargement depuis Supabase...');
+            try {
+                const response = await fetch(`${SUPABASE_URL}/rest/v1/europe?id=eq.1`, {
+                    method: 'GET',
+                    headers: {
+                        'apikey': SUPABASE_KEY,
+                        'Authorization': `Bearer ${SUPABASE_KEY}`,
+                        'Content-Type': 'application/json'
+                    }
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    console.log('📖 Réponse Supabase reçue');
+                    
+                    if (data && data.length > 0 && data[0].data) {
+                        console.log('✅ Données Supabase chargées');
+                        supabaseConnected = true;
+                        updateSupabaseStatus();
+                        return data[0].data;
+                    } else {
+                        console.warn('📖 Supabase retourne un tableau vide');
+                        return null;
+                    }
+                } else {
+                    console.error('❌ Réponse Supabase invalide:', response.status);
+                    if (response.status === 404) {
+                        console.warn('⚠️ Table europe non trouvée dans Supabase');
+                        supabaseConnected = false;
+                        updateSupabaseStatus();
+                    }
+                    throw new Error('Réponse Supabase invalide');
+                }
+            } catch (e) {
+                console.warn('❌ Chargement Supabase échoué, fallback localStorage:', e);
+                try {
+                    const raw = localStorage.getItem(STORAGE_KEY);
+                    if (!raw) return null;
+                    return JSON.parse(raw);
+                } catch (e2) {
+                    console.error('❌ Erreur fallback:', e2);
+                    return null;
+                }
+            }
+        }
+
+        // Données initiales
+        let transactions = [];
 
         // Initialisation
-        document.addEventListener('DOMContentLoaded', function() {
+        document.addEventListener('DOMContentLoaded', async function() {
             // Définir la date du jour par défaut
             const today = new Date().toISOString().split('T')[0];
             document.getElementById('date-transaction').value = today;
             
-            // Charger les transactions depuis le localStorage si disponibles
-            loadTransactionsFromStorage();
+            // Charger les transactions depuis Supabase ou localStorage
+            const loadedData = await loadData();
+            if (loadedData && loadedData.transactions) {
+                transactions = loadedData.transactions;
+            }
             
             // Mettre à jour les totaux
             updateTotals();
@@ -511,7 +696,7 @@
         }
 
         // Fonction pour ajouter une transaction
-        function addTransaction() {
+        async function addTransaction() {
             const type = document.querySelector('input[name="type"]:checked').value;
             const nombre = parseInt(document.getElementById('nombre-palettes').value);
             const transporteur = document.getElementById('transporteur').value;
@@ -538,8 +723,8 @@
             // Ajouter à la liste des transactions
             transactions.push(newTransaction);
             
-            // Sauvegarder dans le localStorage
-            saveTransactionsToStorage();
+            // Sauvegarder
+            await saveData({data: {transactions: transactions}, updated_at: new Date().toISOString()});
             
             // Mettre à jour l'affichage
             updateTotals();
@@ -556,12 +741,12 @@
         }
 
         // Fonction pour supprimer une transaction
-        function deleteTransaction(id) {
+        async function deleteTransaction(id) {
             if (confirm("Êtes-vous sûr de vouloir supprimer cette transaction ?")) {
                 transactions = transactions.filter(transaction => transaction.id !== id);
                 
-                // Sauvegarder dans le localStorage
-                saveTransactionsToStorage();
+                // Sauvegarder
+                await saveData({data: {transactions: transactions}, updated_at: new Date().toISOString()});
                 
                 // Mettre à jour l'affichage
                 updateTotals();
@@ -645,18 +830,57 @@
             });
         }
 
-        // Fonction pour sauvegarder les transactions dans le localStorage
-        function saveTransactionsToStorage() {
-            localStorage.setItem('palettes-transactions', JSON.stringify(transactions));
-        }
-
-        // Fonction pour charger les transactions depuis le localStorage
-        function loadTransactionsFromStorage() {
-            const storedTransactions = localStorage.getItem('palettes-transactions');
-            if (storedTransactions) {
-                transactions = JSON.parse(storedTransactions);
+        setInterval(async () => {
+            const now = Date.now();
+            if (now - lastSyncTime >= SYNC_INTERVAL && supabaseReady && supabaseConnected) {
+                lastSyncTime = now;
+                try {
+                    const response = await fetch(`${SUPABASE_URL}/rest/v1/europe?id=eq.1`, {
+                        method: 'GET',
+                        headers: {
+                            'apikey': SUPABASE_KEY,
+                            'Authorization': `Bearer ${SUPABASE_KEY}`,
+                            'Content-Type': 'application/json'
+                        }
+                    });
+                    if (response.ok) {
+                        const data = await response.json();
+                        if (data && data.length > 0) {
+                            const remoteData = data[0];
+                            if (remoteData.data && remoteData.data.transactions) {
+                                // Vérifier si les données distantes sont différentes
+                                const remoteTransactions = JSON.stringify(remoteData.data.transactions);
+                                const localTransactions = JSON.stringify(transactions);
+                                
+                                if (remoteTransactions !== localTransactions) {
+                                    console.log('🔄 Données distantes différentes, synchronisation...');
+                                    isSyncing = true;
+                                    transactions = remoteData.data.transactions;
+                                    updateTotals();
+                                    renderTransactions();
+                                    console.log('✅ Synchronisation terminée');
+                                    isSyncing = false;
+                                }
+                            }
+                        } else {
+                            // Si la table est vide, sauvegarder les données locales
+                            console.log('📤 Table distante vide, sauvegarde des données locales...');
+                            if (transactions.length > 0) {
+                                await saveData({data: {transactions: transactions}, updated_at: new Date().toISOString()});
+                            }
+                        }
+                    } else if (response.status === 404) {
+                        console.warn('⚠️ Table europe non trouvée dans Supabase');
+                        supabaseConnected = false;
+                        updateSupabaseStatus();
+                    }
+                } catch (e) {
+                    console.warn('Erreur synchronisation:', e);
+                    supabaseConnected = false;
+                    updateSupabaseStatus();
+                }
             }
-        }
+        }, SYNC_INTERVAL);
     </script>
 </body>
 </html>
